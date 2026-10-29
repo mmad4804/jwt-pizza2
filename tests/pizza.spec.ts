@@ -118,6 +118,7 @@ async function initAs(page: Page, user: User, path: string) {
     { requiresAuth: false, method: 'POST', path: '/api/order/verify', description: 'Verify pizza', example: '{ jwt }', response: { message: 'valid' } },
   ] } }));
   await page.route('**/api/order/verify', async (route) => route.fulfill({ json: { message: 'valid', payload: { orderId: '23' } } }));
+  await page.route('**/api/user?*', async (route) => route.fulfill({ json: { users: [], more: false } }));
   await page.goto(path);
 }
 
@@ -246,4 +247,68 @@ test('logout clears the session', async ({ page }) => {
   await initAs(page, adminUser, '/');
   await page.getByRole('link', { name: 'Logout' }).click();
   await expect(page.getByRole('link', { name: 'Login' })).toBeVisible();
+});
+
+test('diner updates name, email, and password through the profile dialog', async ({ page }) => {
+  const diner: User = { id: '17', name: 'Pizza Diner', email: 'diner@jwt.com', roles: [{ role: Role.Diner }] };
+  await page.addInitScript(() => localStorage.setItem('token', 'old-token'));
+  await page.route('**/api/user/me', (route) => route.fulfill({ json: diner }));
+  await page.route('**/api/order', (route) => route.fulfill({ json: { orders: [] } }));
+  await page.route('**/api/user/17', async (route) => {
+    expect(route.request().method()).toBe('PUT');
+    expect(route.request().headers()['authorization']).toBe('Bearer old-token');
+    const body = route.request().postDataJSON();
+    expect(body).toMatchObject({ name: 'Pizza Diner Updated', email: 'updated@jwt.com', password: 'new-secret' });
+    await route.fulfill({ json: { user: { ...diner, ...body }, token: 'new-token' } });
+  });
+  await page.goto('/diner-dashboard');
+
+  await expect(page.getByRole('main')).toContainText('Pizza Diner');
+  await page.getByRole('button', { name: 'Edit' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit user' });
+  await dialog.getByRole('textbox', { name: 'Name' }).fill('Pizza Diner Updated');
+  await dialog.getByRole('textbox', { name: 'Email address' }).fill('updated@jwt.com');
+  await dialog.getByLabel('Password').fill('new-secret');
+  await dialog.getByRole('button', { name: 'Update' }).click();
+
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByRole('main')).toContainText('Pizza Diner Updated');
+  expect(await page.evaluate(() => localStorage.getItem('token'))).toBe('new-token');
+});
+
+test('admin filters, paginates, and deletes users', async ({ page }) => {
+  let buddyDeleted = false;
+  await page.addInitScript(() => localStorage.setItem('token', 'admin-token'));
+  await page.route('**/api/user/me', (route) => route.fulfill({ json: adminUser }));
+  await page.route('**/api/franchise**', (route) => route.fulfill({ json: { franchises: [], more: false } }));
+  await page.route('**/api/user?*', async (route) => {
+    const url = new URL(route.request().url());
+    const name = url.searchParams.get('name') || '*';
+    const pageNumber = Number(url.searchParams.get('page'));
+    const allUsers: User[] = [
+      { id: '20', name: 'Buddy Baker', email: 'buddy@jwt.com', roles: [{ role: Role.Diner }] },
+      { id: '21', name: 'Casey Cook', email: 'casey@jwt.com', roles: [{ role: Role.Admin }] },
+    ];
+    const matchingUsers = allUsers.filter((user) => !(buddyDeleted && user.id === '20') && (name === '*' || user.name?.toLowerCase().includes(name.replaceAll('*', '').toLowerCase())));
+    const users = pageNumber === 1 ? matchingUsers.slice(0, 1) : matchingUsers.slice(1, 2);
+    await route.fulfill({ json: { users, more: pageNumber === 1 && matchingUsers.length > 1 } });
+  });
+  await page.route('**/api/user/20', async (route) => {
+    expect(route.request().method()).toBe('DELETE');
+    buddyDeleted = true;
+    await route.fulfill({ status: 204, body: '' });
+  });
+  await page.goto('/admin-dashboard');
+
+  await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'Buddy Baker', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Next users page' }).click();
+  await expect(page.getByRole('cell', { name: 'Casey Cook', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Previous users page' }).click();
+  await page.getByRole('searchbox', { name: 'Filter users by name' }).fill('Buddy');
+  await page.getByRole('button', { name: 'Filter' }).click();
+  await expect(page.getByRole('cell', { name: 'Buddy Baker', exact: true })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'Casey Cook', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Delete Buddy Baker' }).click();
+  await expect(page.getByText('No users found.')).toBeVisible();
 });

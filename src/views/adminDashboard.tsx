@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import NotFound from './notFound';
 import Button from '../components/button';
 import { pizzaService } from '../service/service';
-import { Franchise, FranchiseList, Role, Store, User } from '../service/pizzaService';
+import { Franchise, FranchiseList, Role, Store, User, UserList } from '../service/pizzaService';
 import { TrashIcon } from '../icons';
 
 interface Props {
@@ -16,12 +16,22 @@ export default function AdminDashboard(props: Props) {
   const [franchiseList, setFranchiseList] = React.useState<FranchiseList>({ franchises: [], more: false });
   const [franchisePage, setFranchisePage] = React.useState(0);
   const filterFranchiseRef = React.useRef<HTMLInputElement>(null);
+  const [userList, setUserList] = React.useState<UserList>({ users: [], more: false });
+  const [userPage, setUserPage] = React.useState(1);
+  const [userFilter, setUserFilter] = React.useState('*');
+  const filterUserRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
     (async () => {
       setFranchiseList(await pizzaService.getFranchises(franchisePage, 3, '*'));
     })();
   }, [props.user, franchisePage]);
+
+  React.useEffect(() => {
+    (async () => {
+      setUserList(await pizzaService.getUsers(userPage, 5, userFilter));
+    })();
+  }, [props.user, userPage, userFilter]);
 
   function createFranchise() {
     navigate('/admin-dashboard/create-franchise');
@@ -37,6 +47,17 @@ export default function AdminDashboard(props: Props) {
 
   async function filterFranchises() {
     setFranchiseList(await pizzaService.getFranchises(franchisePage, 10, `*${filterFranchiseRef.current?.value}*`));
+  }
+
+  function filterUsers(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setUserPage(1);
+    setUserFilter(`*${filterUserRef.current?.value || ''}*`);
+  }
+
+  async function deleteUser(user: User) {
+    await pizzaService.deleteUser(user);
+    setUserList(await pizzaService.getUsers(userPage, 5, userFilter));
   }
 
   let response = <NotFound />;
@@ -123,6 +144,48 @@ export default function AdminDashboard(props: Props) {
         <div>
           <Button className="w-36 text-xs sm:text-sm sm:w-64" title="Add Franchise" onPress={createFranchise} />
         </div>
+        <section className="mt-10 text-start" aria-labelledby="users-heading">
+          <h3 id="users-heading" className="text-xl text-neutral-100">Users</h3>
+          <div className="my-4 overflow-x-auto bg-neutral-100">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-slate-400 text-neutral-100">
+                <tr>
+                  {['Name', 'Email', 'Role', 'Action'].map((header) => <th key={header} scope="col" className="px-4 py-3 text-start text-xs font-medium uppercase">{header}</th>)}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {userList.users.map((listedUser) => (
+                  <tr key={listedUser.id}>
+                    <td className="px-4 py-3 text-sm text-gray-800">{listedUser.name}</td>
+                    <td className="px-4 py-3 text-sm text-gray-800">{listedUser.email}</td>
+                    <td className="px-4 py-3 text-sm text-gray-800">{listedUser.roles?.map((role) => role.role).join(', ')}</td>
+                    <td className="px-4 py-2 text-end">
+                      <button type="button" aria-label={`Delete ${listedUser.name}`} className="inline-flex items-center gap-2 rounded-lg border border-orange-400 px-2 py-1 text-sm font-semibold text-orange-600 hover:border-orange-800" onClick={() => deleteUser(listedUser)}>
+                        <TrashIcon /> Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {userList.users.length === 0 && <tr><td colSpan={4} className="px-4 py-3 text-center text-sm text-gray-600">No users found.</td></tr>}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={2} className="px-2 py-2">
+                    <form className="flex gap-2" onSubmit={filterUsers}>
+                      <input aria-label="Filter users by name" type="search" ref={filterUserRef} placeholder="Filter users by name" className="min-w-0 rounded-lg border border-gray-300 px-2 py-1 text-sm" />
+                      <button type="submit" className="rounded-lg border border-orange-400 px-2 py-1 text-sm font-semibold text-orange-600">Filter</button>
+                    </form>
+                  </td>
+                  <td colSpan={2} className="px-2 py-2 text-end">
+                    <button type="button" aria-label="Previous users page" className="m-1 w-12 rounded-lg bg-white p-1 disabled:bg-neutral-300" onClick={() => setUserPage(userPage - 1)} disabled={userPage <= 1}>«</button>
+                    <span aria-label="Users page">{userPage}</span>
+                    <button type="button" aria-label="Next users page" className="m-1 w-12 rounded-lg bg-white p-1 disabled:bg-neutral-300" onClick={() => setUserPage(userPage + 1)} disabled={!userList.more}>»</button>
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </section>
       </View>
     );
   }

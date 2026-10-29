@@ -1,4 +1,4 @@
-import { PizzaService, Franchise, FranchiseList, Store, OrderHistory, User, Menu, Order, Endpoints, OrderResponse, JWTPayload } from './pizzaService';
+import { PizzaService, Franchise, FranchiseList, Store, OrderHistory, User, UserList, Menu, Order, Endpoints, OrderResponse, JWTPayload } from './pizzaService';
 
 const pizzaServiceUrl = import.meta.env.VITE_PIZZA_SERVICE_URL;
 const pizzaFactoryUrl = import.meta.env.VITE_PIZZA_FACTORY_URL;
@@ -29,7 +29,7 @@ class HttpPizzaService implements PizzaService {
         }
 
         const r = await fetch(path, options);
-        const j = await r.json();
+        const j = r.status === 204 ? null : await r.json();
         if (r.ok) {
           resolve(j);
         } else {
@@ -68,6 +68,21 @@ class HttpPizzaService implements PizzaService {
       }
     }
     return Promise.resolve(result);
+  }
+
+  async updateUser(user: User): Promise<User> {
+    const { user: updatedUser, token } = await this.callEndpoint(`/api/user/${user.id}`, 'PUT', user);
+    localStorage.setItem('token', token);
+    return updatedUser;
+  }
+
+  async getUsers(page: number = 1, limit: number = 10, nameFilter: string = '*'): Promise<UserList> {
+    const query = new URLSearchParams({ page: String(page), limit: String(limit), name: nameFilter });
+    return this.callEndpoint(`/api/user?${query.toString()}`);
+  }
+
+  async deleteUser(user: User): Promise<void> {
+    await this.callEndpoint(`/api/user/${user.id}`, 'DELETE');
   }
 
   async getMenu(): Promise<Menu> {
